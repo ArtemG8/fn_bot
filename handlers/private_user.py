@@ -1,8 +1,9 @@
 import secrets
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
+from typing import Optional
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -16,6 +17,7 @@ from keyboards.keyboard_utils import (
 from keyboards.flow_kb import get_cancel_keyboard
 from states.states import DepositStates, TopUpStates, WithdrawStates
 from config.config import conf
+from utils import format_balance
 
 router = Router()
 
@@ -27,7 +29,7 @@ DEFAULT_INTEREST_RATE = Decimal('1')  # 1% в день
 USDT_ADDRESS = conf.USDT_ADDRESS or "TYourUSDTAddressHere"
 
 
-async def get_or_create_user(user_id: int, username: str = None, full_name: str = None, referred_by: int = None) -> User:
+async def get_or_create_user(user_id: int, username: str = None, full_name: str = None, referred_by: int = None, bot: Optional[Bot] = None) -> User:
     """Получает пользователя из БД или создает нового"""
     user = await db.fetchrow(
         "SELECT * FROM users WHERE user_id = $1",
@@ -48,18 +50,28 @@ async def get_or_create_user(user_id: int, username: str = None, full_name: str 
         user_id, username, full_name, referral_code, referred_by
     )
     
-    # Если пользователь пришел по реферальной ссылке, начисляем бонус рефереру
-    if referred_by:
-        referrer = await db.fetchrow("SELECT * FROM users WHERE user_id = $1", referred_by)
-        if referrer:
-            # Можно добавить небольшой бонус за регистрацию реферала
+    # Если пользователь пришел по реферальной ссылке, отправляем сообщение пригласившему
+    if referred_by and bot:
+        try:
+            if username:
+                username_display = f"@{username}"
+            elif full_name:
+                username_display = full_name
+            else:
+                username_display = "пользователь"
+            await bot.send_message(
+                referred_by,
+                f"По вашей ссылке зарегался: {username_display}"
+            )
+        except Exception:
+            # Если не удалось отправить сообщение (пользователь заблокировал бота и т.д.)
             pass
     
-    return await get_or_create_user(user_id, username, full_name, referred_by)
+    return await get_or_create_user(user_id, username, full_name, referred_by, bot)
 
 
 @router.message(Command('start'))
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     """Обработчик команды /start"""
     await state.clear()
     
@@ -78,7 +90,8 @@ async def cmd_start(message: Message, state: FSMContext):
         message.from_user.id,
         message.from_user.username,
         message.from_user.full_name,
-        referred_by
+        referred_by,
+        bot
     )
     
     await message.answer(
@@ -107,7 +120,7 @@ async def cmd_profile(message: Message):
     
     await message.answer(
         LEXICON_RU['profile'].format(
-            balance=user.balance,
+            balance=format_balance(user.balance),
             active_deposits=active_deposits,
             referrals_count=referrals_count,
             referral_code=user.referral_code
@@ -121,7 +134,7 @@ async def cmd_balance(message: Message):
     """Показывает баланс пользователя"""
     user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await message.answer(
-        LEXICON_RU['balance'].format(balance=user.balance)
+        LEXICON_RU['balance'].format(balance=format_balance(user.balance))
     )
 
 
@@ -230,10 +243,10 @@ async def list_deposits_callback(callback: CallbackQuery):
     deposits_text = ""
     for dep in deposits:
         deposits_text += f"\n💼 Депозит #{dep['deposit_id']}\n"
-        deposits_text += f"Сумма: {dep['amount']} USDT\n"
-        deposits_text += f"Баланс: {dep['current_balance']} USDT\n"
+        deposits_text += f"Сумма: {format_balance(dep['amount'])}\n"
+        deposits_text += f"Баланс: {format_balance(dep['current_balance'])}\n"
         deposits_text += f"Ставка: {dep['interest_rate']}% в день\n"
-        deposits_text += f"Заработано: {dep['total_earned']} USDT\n"
+        deposits_text += f"Заработано: {format_balance(dep['total_earned'])}\n"
         deposits_text += f"Статус: {dep['status']}\n"
     
     await callback.message.edit_text(
@@ -353,7 +366,7 @@ async def cmd_referral(message: Message):
     text = LEXICON_RU['referral'].format(
         code=user.referral_code,
         count=referrals_count,
-        bonuses=total_bonuses
+        bonuses=format_balance(total_bonuses)
     )
     text += f"\n\n🔗 Ваша реферальная ссылка:\n{referral_link}"
     

@@ -13,6 +13,7 @@ from keyboards.keyboard_utils import (
 )
 from states.states import AdminStates
 from config.config import conf
+from utils import format_balance
 
 router = Router()
 
@@ -93,7 +94,7 @@ async def admin_pending_callback(callback: CallbackQuery):
         transactions_text += f"ID: {trans['transaction_id']}\n"
         transactions_text += f"Тип: {trans['transaction_type']}\n"
         transactions_text += f"Пользователь: {trans['full_name']} (@{trans['username']})\n"
-        transactions_text += f"Сумма: {trans['amount']} USDT\n"
+        transactions_text += f"Сумма: {format_balance(trans['amount'])}\n"
         transactions_text += f"Описание: {trans['description']}\n"
         transactions_text += f"Дата: {trans['created_at']}\n"
     
@@ -137,7 +138,7 @@ async def approve_transaction_callback(callback: CallbackQuery, bot: Bot):
         try:
             await bot.send_message(
                 transaction['user_id'],
-                f"На ваш баланс зачислено {transaction['amount']} $!"
+                f"На ваш баланс зачислено {format_balance(transaction['amount'])}!"
             )
         except Exception as e:
             # Если не удалось отправить сообщение (пользователь заблокировал бота и т.д.)
@@ -260,14 +261,14 @@ async def process_admin_amount(message: Message, state: FSMContext, bot: Bot):
         try:
             await bot.send_message(
                 user_id,
-                f"На ваш баланс зачислено {amount} $!"
+                f"На ваш баланс зачислено {format_balance(amount)}!"
             )
         except Exception as e:
             # Если не удалось отправить сообщение (пользователь заблокировал бота и т.д.)
             pass
         
         await message.answer(
-            f"✅ Баланс пользователя пополнен на {amount} USDT"
+            f"✅ Баланс пользователя пополнен на {format_balance(amount)}"
         )
         await state.clear()
         
@@ -294,9 +295,9 @@ async def admin_stats_callback(callback: CallbackQuery):
 📊 <b>Статистика системы</b>
 
 👥 Всего пользователей: {total_users}
-💰 Общий баланс пользователей: {total_balance} USDT
+💰 Общий баланс пользователей: {format_balance(total_balance)}
 📈 Активных депозитов: {total_deposits}
-💼 Сумма в депозитах: {total_deposits_amount} USDT
+💼 Сумма в депозитах: {format_balance(total_deposits_amount)}
 """
     
     await callback.message.edit_text(
