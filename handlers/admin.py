@@ -211,7 +211,7 @@ async def admin_add_balance_callback(callback: CallbackQuery, state: FSMContext)
         return
     
     await callback.message.edit_text(
-        "Введите username пользователя для начисления баланса (без @):",
+        "Введите username пользователя для начисления баланса:",
         reply_markup=get_admin_back_keyboard()
     )
     await state.set_state(AdminStates.waiting_for_username)

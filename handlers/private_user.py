@@ -61,7 +61,7 @@ async def get_or_create_user(user_id: int, username: str = None, full_name: str 
                 username_display = "пользователь"
             await bot.send_message(
                 referred_by,
-                f"По вашей ссылке зарегался: {username_display}"
+                f"По вашей ссылке зарегистрировался: {username_display}"
             )
         except Exception:
             # Если не удалось отправить сообщение (пользователь заблокировал бота и т.д.)
@@ -371,25 +371,6 @@ async def cmd_referral(message: Message):
     text += f"\n\n🔗 Ваша реферальная ссылка:\n{referral_link}"
     
     await message.answer(text)
-
-
-# Известные команды (чтобы не перехватывать /admin и др.)
-KNOWN_COMMANDS = {'start', 'profile', 'balance', 'deposits', 'topup', 'withdraw', 'referral', 'admin'}
-
-
-def is_unknown_command(message: Message) -> bool:
-    """True, если сообщение — команда (начинается с /) и не из списка известных."""
-    text = (message.text or '').strip()
-    if not text.startswith('/'):
-        return False
-    cmd = text.split()[0][1:].split('@')[0].lower()
-    return cmd not in KNOWN_COMMANDS
-
-
-@router.message(is_unknown_command)
-async def unknown_command(message: Message):
-    """Обработчик неизвестных команд"""
-    await message.answer(LEXICON_RU['unknown_command'])
 
 
 @router.callback_query(F.data == "back_to_main")
