@@ -373,6 +373,25 @@ async def cmd_referral(message: Message):
     await message.answer(text)
 
 
+# Известные команды (чтобы не перехватывать /admin и др.)
+KNOWN_COMMANDS = {'start', 'profile', 'balance', 'deposits', 'topup', 'withdraw', 'referral', 'admin'}
+
+
+def is_unknown_command(message: Message) -> bool:
+    """True, если сообщение — команда (начинается с /) и не из списка известных."""
+    text = (message.text or '').strip()
+    if not text.startswith('/'):
+        return False
+    cmd = text.split()[0][1:].split('@')[0].lower()
+    return cmd not in KNOWN_COMMANDS
+
+
+@router.message(is_unknown_command)
+async def unknown_command(message: Message):
+    """Обработчик неизвестных команд"""
+    await message.answer(LEXICON_RU['unknown_command'])
+
+
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: CallbackQuery):
     """Возврат в главное меню"""

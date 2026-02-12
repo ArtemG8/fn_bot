@@ -65,6 +65,7 @@ LEXICON_RU = {
     
     'referral_link': 'https://t.me/{bot_username}?start={code}',
     
+    'unknown_command': '❌ Неизвестная команда. Используйте /start для начала работы.',
     'error': '❌ Произошла ошибка. Попробуйте позже.',
     'not_enough_balance': '❌ Недостаточно средств на балансе.',
     'invalid_amount': '❌ Неверная сумма. Минимум: {min} USDT',
