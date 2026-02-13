@@ -12,7 +12,8 @@ from database.connection import db
 from database.models import User, Deposit, Transaction
 from lexicon.lexicon_ru import LEXICON_RU
 from keyboards.keyboard_utils import (
-    get_main_keyboard, get_deposit_keyboard, get_back_keyboard
+    get_main_keyboard, get_deposit_keyboard, get_back_keyboard,
+    get_referral_keyboard, get_referrals_list_keyboard, REFERRALS_PER_PAGE
 )
 from keyboards.flow_kb import get_cancel_keyboard
 from states.states import DepositStates, TopUpStates, WithdrawStates
@@ -264,10 +265,6 @@ async def cmd_topup(message: Message, state: FSMContext):
         LEXICON_RU['top_up'].format(address=USDT_ADDRESS),
         reply_markup=get_cancel_keyboard()
     )
-    await message.answer(
-        "Введите сумму, которую вы отправили (в USDT):",
-        reply_markup=get_cancel_keyboard()
-    )
     await state.set_state(TopUpStates.waiting_for_amount)
 
 
@@ -425,7 +422,93 @@ async def cmd_referral(message: Message):
     )
     text += f"\n\n🔗 Ваша реферальная ссылка:\n{referral_link}"
     
-    await message.answer(text)
+    await message.answer(text, reply_markup=get_referral_keyboard(referrals_count))
+
+
+def _format_referral_date(dt) -> str:
+    """Форматирует дату реферала без секунд"""
+    if dt is None:
+        return ""
+    s = str(dt)
+    return s[:16] if len(s) > 16 else s
+
+
+@router.callback_query(F.data.startswith("referrals_page_"))
+async def referrals_list_callback(callback: CallbackQuery):
+    """Список рефералов с пагинацией"""
+    page = int(callback.data.split("_")[-1])
+    referrer_id = callback.from_user.id
+    
+    total = await db.fetchval(
+        "SELECT COUNT(*) FROM users WHERE referred_by = $1",
+        referrer_id
+    ) or 0
+    
+    if total == 0:
+        await callback.answer("У вас пока нет рефералов", show_alert=True)
+        return
+    
+    total_pages = (total + REFERRALS_PER_PAGE - 1) // REFERRALS_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    
+    referrals = await db.fetch(
+        """SELECT user_id, username, full_name, created_at 
+           FROM users 
+           WHERE referred_by = $1 
+           ORDER BY created_at DESC 
+           LIMIT $2 OFFSET $3""",
+        referrer_id, REFERRALS_PER_PAGE, page * REFERRALS_PER_PAGE
+    )
+    
+    lines = [f"👥 <b>Ваши рефералы</b> (стр. {page + 1} из {total_pages})\n"]
+    for i, r in enumerate(referrals, start=page * REFERRALS_PER_PAGE + 1):
+        name = (r['full_name'] or "").strip() or "—"
+        username = f"@{r['username']}" if r['username'] else "без username"
+        date_str = _format_referral_date(r['created_at'])
+        lines.append(f"{i}. {name} ({username})\n   📅 {date_str}")
+    
+    text = "\n".join(lines)
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_referrals_list_keyboard(page, total_pages)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "referral_back")
+async def referral_back_callback(callback: CallbackQuery):
+    """Возврат из списка рефералов к основному блоку реферальной программы"""
+    user = await get_or_create_user(
+        callback.from_user.id,
+        callback.from_user.username,
+        callback.from_user.full_name
+    )
+    referrals_count = await db.fetchval(
+        "SELECT COUNT(*) FROM users WHERE referred_by = $1",
+        callback.from_user.id
+    ) or 0
+    total_bonuses = await db.fetchval(
+        "SELECT COALESCE(SUM(amount), 0) FROM referral_bonuses WHERE referrer_id = $1",
+        callback.from_user.id
+    ) or 0
+    bot_username = (await callback.bot.get_me()).username
+    referral_link = LEXICON_RU['referral_link'].format(
+        bot_username=bot_username,
+        code=user.referral_code
+    )
+    text = LEXICON_RU['referral'].format(
+        code=user.referral_code,
+        count=referrals_count,
+        bonuses=format_balance(total_bonuses)
+    )
+    text += f"\n\n🔗 Ваша реферальная ссылка:\n{referral_link}"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_referral_keyboard(referrals_count)
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "back_to_main")

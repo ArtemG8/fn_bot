@@ -88,3 +88,32 @@ def get_cancel_news_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_admin"))
     return builder.as_markup()
+
+
+# Рефералы: записей на страницу и максимальная длина callback_data (64 байта)
+REFERRALS_PER_PAGE = 10
+
+
+def get_referral_keyboard(referrals_count: int) -> InlineKeyboardMarkup:
+    """Клавиатура реферальной программы: кнопка «Список рефералов» если есть рефералы"""
+    builder = InlineKeyboardBuilder()
+    if referrals_count > 0:
+        builder.add(InlineKeyboardButton(
+            text=f"📋 Список рефералов ({referrals_count})",
+            callback_data="referrals_page_0"
+        ))
+    return builder.as_markup()
+
+
+def get_referrals_list_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """Клавиатура пагинации списка рефералов"""
+    builder = InlineKeyboardBuilder()
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"referrals_page_{page - 1}"))
+    row.append(InlineKeyboardButton(text="🔙 К программе", callback_data="referral_back"))
+    if page < total_pages - 1:
+        row.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"referrals_page_{page + 1}"))
+    for btn in row:
+        builder.add(btn)
+    return builder.as_markup()
