@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from database.connection import db
 from lexicon.lexicon_ru import LEXICON_RU
 from keyboards.keyboard_utils import (
-    get_admin_keyboard, get_transaction_keyboard, get_back_keyboard,
+    get_admin_keyboard, get_main_keyboard, get_transaction_keyboard, get_back_keyboard,
     get_admin_back_keyboard, get_admin_settings_keyboard, get_cancel_reject_keyboard,
     get_cancel_news_keyboard
 )
@@ -501,6 +501,19 @@ async def back_to_admin_callback(callback: CallbackQuery, state: FSMContext):
         LEXICON_RU['admin_panel'],
         reply_markup=get_admin_keyboard()
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "exit_admin")
+async def exit_admin_callback(callback: CallbackQuery, state: FSMContext):
+    """Выход из админ-панели"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.clear()
+    await callback.message.edit_text("Вы вышли из админ-панели.")
+    await callback.message.answer("Главное меню", reply_markup=get_main_keyboard())
     await callback.answer()
 
 

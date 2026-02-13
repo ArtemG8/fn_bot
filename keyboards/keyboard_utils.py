@@ -34,6 +34,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="📰 Новости", callback_data="admin_news"))
     builder.add(InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"))
     builder.add(InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings"))
+    builder.add(InlineKeyboardButton(text="🚪 Выйти из админки", callback_data="exit_admin"))
     builder.adjust(1)
     return builder.as_markup()
 
