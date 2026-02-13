@@ -72,3 +72,10 @@ def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_admin"))
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_cancel_reject_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для отмены ввода причины отклонения"""
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_reject"))
+    return builder.as_markup()

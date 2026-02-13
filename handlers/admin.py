@@ -1,5 +1,6 @@
 import os
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, StateFilter
@@ -9,7 +10,7 @@ from database.connection import db
 from lexicon.lexicon_ru import LEXICON_RU
 from keyboards.keyboard_utils import (
     get_admin_keyboard, get_transaction_keyboard, get_back_keyboard,
-    get_admin_back_keyboard, get_admin_settings_keyboard
+    get_admin_back_keyboard, get_admin_settings_keyboard, get_cancel_reject_keyboard
 )
 from states.states import AdminStates
 from config.config import conf
@@ -64,8 +65,15 @@ async def process_admin_password(message: Message, state: FSMContext):
     await state.clear()
 
 
+def format_datetime(dt) -> str:
+    """Форматирует дату без секунд"""
+    if isinstance(dt, datetime):
+        return dt.strftime("%Y-%m-%d %H:%M")
+    return str(dt)[:16] if len(str(dt)) > 16 else str(dt)
+
+
 @router.callback_query(F.data == "admin_pending")
-async def admin_pending_callback(callback: CallbackQuery):
+async def admin_pending_callback(callback: CallbackQuery, bot: Bot):
     """Список ожидающих транзакций"""
     if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
@@ -88,20 +96,31 @@ async def admin_pending_callback(callback: CallbackQuery):
         await callback.answer()
         return
     
-    transactions_text = ""
-    for trans in transactions:
-        transactions_text += f"\n{'='*30}\n"
-        transactions_text += f"ID: {trans['transaction_id']}\n"
-        transactions_text += f"Тип: {trans['transaction_type']}\n"
-        transactions_text += f"Пользователь: {trans['full_name']} (@{trans['username']})\n"
-        transactions_text += f"Сумма: {format_balance(trans['amount'])}\n"
-        transactions_text += f"Описание: {trans['description']}\n"
-        transactions_text += f"Дата: {trans['created_at']}\n"
-    
+    # Отправляем каждую транзакцию отдельным сообщением с кнопками
     await callback.message.edit_text(
-        LEXICON_RU['pending_transactions'].format(transactions=transactions_text),
+        f"⏳ <b>Ожидающие транзакции</b>\n\nНайдено: {len(transactions)}",
         reply_markup=get_admin_back_keyboard()
     )
+    
+    for trans in transactions:
+        username_display = f"@{trans['username']}" if trans['username'] else "без username"
+        full_name_display = trans['full_name'] or "Не указано"
+        
+        transaction_text = (
+            f"<b>Транзакция #{trans['transaction_id']}</b>\n\n"
+            f"Тип: {trans['transaction_type']}\n"
+            f"Пользователь: {full_name_display} ({username_display})\n"
+            f"Сумма: {format_balance(trans['amount'])}\n"
+            f"Описание: {trans['description'] or 'Не указано'}\n"
+            f"Дата: {format_datetime(trans['created_at'])}"
+        )
+        
+        await bot.send_message(
+            callback.message.chat.id,
+            transaction_text,
+            reply_markup=get_transaction_keyboard(trans['transaction_id'])
+        )
+    
     await callback.answer()
 
 
@@ -138,10 +157,22 @@ async def approve_transaction_callback(callback: CallbackQuery, bot: Bot):
         try:
             await bot.send_message(
                 transaction['user_id'],
-                f"На ваш баланс зачислено {format_balance(transaction['amount'])}!"
+                f"✅ Ваш запрос на пополнение одобрен!\nНа ваш баланс зачислено {format_balance(transaction['amount'])}!"
             )
-        except Exception as e:
+        except Exception:
             # Если не удалось отправить сообщение (пользователь заблокировал бота и т.д.)
+            pass
+    
+    # Если это вывод средств, отправляем сообщение пользователю
+    if transaction['transaction_type'] == 'withdraw':
+        try:
+            await bot.send_message(
+                transaction['user_id'],
+                f"✅ Ваш запрос на вывод средств одобрен!\n"
+                f"Сумма: {format_balance(transaction['amount'])}\n"
+                f"Средства будут переведены в ближайшее время."
+            )
+        except Exception:
             pass
     
     # Обновляем статус транзакции
@@ -153,15 +184,15 @@ async def approve_transaction_callback(callback: CallbackQuery, bot: Bot):
     )
     
     await callback.message.edit_text(
-        LEXICON_RU['transaction_approved'].format(id=transaction_id),
+        f"✅ Транзакция #{transaction_id} одобрена",
         reply_markup=get_admin_back_keyboard()
     )
     await callback.answer("✅ Транзакция одобрена")
 
 
 @router.callback_query(F.data.startswith("reject_"))
-async def reject_transaction_callback(callback: CallbackQuery):
-    """Отклонение транзакции"""
+async def reject_transaction_callback(callback: CallbackQuery, state: FSMContext):
+    """Начало процесса отклонения транзакции - запрос причины"""
     if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
@@ -181,26 +212,109 @@ async def reject_transaction_callback(callback: CallbackQuery):
         await callback.answer("❌ Транзакция уже обработана", show_alert=True)
         return
     
+    # Сохраняем ID транзакции в состоянии
+    await state.update_data(reject_transaction_id=transaction_id)
+    
+    await callback.message.edit_text(
+        f"❌ <b>Отклонение транзакции #{transaction_id}</b>\n\n"
+        f"Введите причину отклонения (это сообщение будет отправлено пользователю):",
+        reply_markup=get_cancel_reject_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_reject_reason)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cancel_reject")
+async def cancel_reject_callback(callback: CallbackQuery, state: FSMContext):
+    """Отмена отклонения транзакции"""
+    await state.clear()
+    await callback.message.edit_text(
+        "Отклонение транзакции отменено.",
+        reply_markup=get_admin_back_keyboard()
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminStates.waiting_for_reject_reason))
+async def process_reject_reason(message: Message, state: FSMContext, bot: Bot):
+    """Обработка причины отклонения транзакции"""
+    if not await is_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа")
+        await state.clear()
+        return
+    
+    data = await state.get_data()
+    transaction_id = data.get('reject_transaction_id')
+    
+    if not transaction_id:
+        await message.answer("❌ Ошибка: транзакция не найдена")
+        await state.clear()
+        return
+    
+    reason = message.text.strip()
+    
+    if not reason:
+        await message.answer("❌ Причина не может быть пустой. Введите причину отклонения:")
+        return
+    
+    transaction = await db.fetchrow(
+        "SELECT * FROM transactions WHERE transaction_id = $1",
+        transaction_id
+    )
+    
+    if not transaction:
+        await message.answer("❌ Транзакция не найдена")
+        await state.clear()
+        return
+    
+    if transaction['status'] != 'pending':
+        await message.answer("❌ Транзакция уже обработана")
+        await state.clear()
+        return
+    
     # Если это вывод, возвращаем средства на баланс
     if transaction['transaction_type'] == 'withdraw':
         await db.execute(
             "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
             transaction['amount'], transaction['user_id']
         )
+        
+        # Отправляем сообщение пользователю с причиной
+        try:
+            await bot.send_message(
+                transaction['user_id'],
+                f"❌ Ваш запрос на вывод средств отклонен.\n\n"
+                f"Сумма {format_balance(transaction['amount'])} возвращена на ваш баланс.\n\n"
+                f"<b>Причина:</b> {reason}"
+            )
+        except Exception:
+            pass
     
-    # Обновляем статус транзакции
+    # Если это пополнение, отправляем сообщение с причиной
+    if transaction['transaction_type'] == 'topup':
+        try:
+            await bot.send_message(
+                transaction['user_id'],
+                f"❌ Ваш запрос на пополнение отклонен.\n\n"
+                f"<b>Причина:</b> {reason}\n\n"
+                f"Обратитесь к администратору для уточнения деталей."
+            )
+        except Exception:
+            pass
+    
+    # Обновляем статус транзакции и сохраняем причину в описании
     await db.execute(
         """UPDATE transactions 
-           SET status = 'rejected', admin_id = $1 
+           SET status = 'rejected', admin_id = $1, description = $3
            WHERE transaction_id = $2""",
-        callback.from_user.id, transaction_id
+        message.from_user.id, transaction_id, f"{transaction['description'] or ''}\nПричина отклонения: {reason}"
     )
     
-    await callback.message.edit_text(
-        LEXICON_RU['transaction_rejected'].format(id=transaction_id),
+    await message.answer(
+        f"✅ Транзакция #{transaction_id} отклонена.\nПричина отправлена пользователю.",
         reply_markup=get_admin_back_keyboard()
     )
-    await callback.answer("❌ Транзакция отклонена")
+    await state.clear()
 
 
 @router.callback_query(F.data == "admin_add_balance")
@@ -211,7 +325,7 @@ async def admin_add_balance_callback(callback: CallbackQuery, state: FSMContext)
         return
     
     await callback.message.edit_text(
-        "Введите username пользователя для начисления баланса:",
+        "Введите username или user_id пользователя для начисления баланса:",
         reply_markup=get_admin_back_keyboard()
     )
     await state.set_state(AdminStates.waiting_for_username)
@@ -220,18 +334,33 @@ async def admin_add_balance_callback(callback: CallbackQuery, state: FSMContext)
 
 @router.message(StateFilter(AdminStates.waiting_for_username))
 async def process_admin_username(message: Message, state: FSMContext):
-    """Обработка username пользователя для начисления"""
-    username = message.text.strip().lstrip('@')
-    user = await db.fetchrow("SELECT * FROM users WHERE username = $1", username)
+    """Обработка username или user_id пользователя для начисления"""
+    text = message.text.strip().lstrip('@')
     
-    if not user:
-        await message.answer("❌ Пользователь с таким username не найден")
-        return
+    # Проверяем, является ли введенное значение числом (user_id)
+    try:
+        user_id = int(text)
+        # Ищем по user_id
+        user = await db.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+        if not user:
+            await message.answer(f"❌ Пользователь с ID {user_id} не найден")
+            return
+    except ValueError:
+        # Не число, значит это username
+        username = text
+        user = await db.fetchrow("SELECT * FROM users WHERE username = $1", username)
+        if not user:
+            await message.answer(f"❌ Пользователь с username @{username} не найден")
+            return
     
     await state.update_data(admin_user_id=user['user_id'])
+    username_display = f"@{user['username']}" if user['username'] else "без username"
     await message.answer(
-        f"Пользователь найден: {user['full_name']} (@{user['username']})\n"
-        f"Введите сумму для начисления (в USDT):"
+        f"Пользователь найден:\n"
+        f"ID: {user['user_id']}\n"
+        f"Имя: {user['full_name'] or 'Не указано'}\n"
+        f"Username: {username_display}\n\n"
+        f"Введите сумму для начисления:"
     )
     await state.set_state(AdminStates.waiting_for_amount)
 
