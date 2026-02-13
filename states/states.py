@@ -22,3 +22,4 @@ class AdminStates(StatesGroup):
     waiting_for_password = State()
     waiting_for_new_password = State()
     waiting_for_reject_reason = State()
+    waiting_for_news = State()

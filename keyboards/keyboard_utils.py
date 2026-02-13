@@ -11,7 +11,8 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     builder.add(KeyboardButton(text="💳 Пополнить"))
     builder.add(KeyboardButton(text="💸 Вывести"))
     builder.add(KeyboardButton(text="👥 Реферальная программа"))
-    builder.adjust(2, 2, 2)
+    builder.add(KeyboardButton(text="📰 Новости"))
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -30,6 +31,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="📋 Ожидающие транзакции", callback_data="admin_pending"))
     builder.add(InlineKeyboardButton(text="➕ Начислить баланс", callback_data="admin_add_balance"))
+    builder.add(InlineKeyboardButton(text="📰 Новости", callback_data="admin_news"))
     builder.add(InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"))
     builder.add(InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings"))
     builder.adjust(1)
@@ -78,4 +80,11 @@ def get_cancel_reject_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для отмены ввода причины отклонения"""
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_reject"))
+    return builder.as_markup()
+
+
+def get_cancel_news_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для отмены редактирования новостей"""
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_admin"))
     return builder.as_markup()

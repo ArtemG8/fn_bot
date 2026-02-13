@@ -262,8 +262,49 @@ async def cmd_topup(message: Message, state: FSMContext):
     """Пополнение баланса"""
     await message.answer(
         LEXICON_RU['top_up'].format(address=USDT_ADDRESS),
-        reply_markup=get_main_keyboard()
+        reply_markup=get_cancel_keyboard()
     )
+    await message.answer(
+        "Введите сумму, которую вы отправили (в USDT):",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(TopUpStates.waiting_for_amount)
+
+
+@router.message(StateFilter(TopUpStates.waiting_for_amount))
+async def process_topup_amount(message: Message, state: FSMContext):
+    """Обработка суммы пополнения"""
+    try:
+        amount = Decimal(message.text.replace(',', '.'))
+        
+        if amount < MIN_TOPUP:
+            await message.answer(
+                f"❌ Минимальная сумма пополнения: {MIN_TOPUP} USDT"
+            )
+            return
+        
+        user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
+        
+        # Создаем транзакцию на пополнение со статусом 'pending'
+        transaction_id = await db.fetchval(
+            """INSERT INTO transactions (user_id, transaction_type, amount, status, description)
+               VALUES ($1, 'topup', $2, 'pending', $3)
+               RETURNING transaction_id""",
+            message.from_user.id, amount, f"Пополнение баланса на сумму {amount} USDT"
+        )
+        
+        await message.answer(
+            f"✅ <b>Запрос на пополнение создан</b>\n\n"
+            f"Сумма: {format_balance(amount)}\n"
+            f"Адрес: <code>{USDT_ADDRESS}</code>\n\n"
+            f"⏳ Ваш запрос отправлен администратору на проверку.\n"
+            f"После подтверждения транзакции средства будут зачислены на ваш баланс.",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
+        
+    except (ValueError, InvalidOperation):
+        await message.answer("❌ Неверный формат суммы. Введите число, например: 100")
 
 
 @router.message(F.text == "💸 Вывести")
@@ -339,6 +380,20 @@ async def process_withdraw_address(message: Message, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
     await state.clear()
+
+
+@router.message(F.text == "📰 Новости")
+@router.message(Command('news'))
+async def cmd_news(message: Message):
+    """Показ новостей (одно сообщение, редактируется админом)"""
+    content = await db.fetchval(
+        "SELECT setting_value FROM admin_settings WHERE setting_key = 'news_content'"
+    )
+    if not content or not content.strip():
+        text = f"{LEXICON_RU['news_title']}\n\n{LEXICON_RU['news_empty']}"
+    else:
+        text = f"{LEXICON_RU['news_title']}\n\n{content}"
+    await message.answer(text)
 
 
 @router.message(F.text == "👥 Реферальная программа")

@@ -10,7 +10,8 @@ from database.connection import db
 from lexicon.lexicon_ru import LEXICON_RU
 from keyboards.keyboard_utils import (
     get_admin_keyboard, get_transaction_keyboard, get_back_keyboard,
-    get_admin_back_keyboard, get_admin_settings_keyboard, get_cancel_reject_keyboard
+    get_admin_back_keyboard, get_admin_settings_keyboard, get_cancel_reject_keyboard,
+    get_cancel_news_keyboard
 )
 from states.states import AdminStates
 from config.config import conf
@@ -405,6 +406,58 @@ async def process_admin_amount(message: Message, state: FSMContext, bot: Bot):
         await message.answer("❌ Неверный формат суммы. Введите число, например: 100")
 
 
+@router.callback_query(F.data == "admin_news")
+async def admin_news_callback(callback: CallbackQuery, state: FSMContext):
+    """Редактирование новостей"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    content = await db.fetchval(
+        "SELECT setting_value FROM admin_settings WHERE setting_key = 'news_content'"
+    )
+    raw = (content or "").strip() or "— пусто —"
+    # Экранируем для отображения в HTML-превью
+    current = raw[:500].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if len(raw) > 500:
+        current += "..."
+    
+    await callback.message.edit_text(
+        f"📰 <b>Редактирование новостей</b>\n\n"
+        f"<b>Текущий текст (что видят пользователи):</b>\n"
+        f"<pre>{current}</pre>\n\n"
+        f"Отправьте новое сообщение — оно полностью заменит текст новостей.\n",
+        reply_markup=get_cancel_news_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_news)
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminStates.waiting_for_news))
+async def process_news_message(message: Message, state: FSMContext):
+    """Сохранение нового текста новостей"""
+    if not await is_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа")
+        await state.clear()
+        return
+    
+    new_content = message.text or message.caption or ""
+    
+    await db.execute(
+        """INSERT INTO admin_settings (setting_key, setting_value) 
+           VALUES ('news_content', $1)
+           ON CONFLICT (setting_key) 
+           DO UPDATE SET setting_value = $1, updated_at = CURRENT_TIMESTAMP""",
+        new_content
+    )
+    
+    await message.answer(
+        "✅ Текст новостей обновлён. Пользователи видят новый контент при открытии раздела «Новости».",
+        reply_markup=get_admin_back_keyboard()
+    )
+    await state.clear()
+
+
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats_callback(callback: CallbackQuery):
     """Статистика системы"""
@@ -437,12 +490,13 @@ async def admin_stats_callback(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "back_to_admin")
-async def back_to_admin_callback(callback: CallbackQuery):
+async def back_to_admin_callback(callback: CallbackQuery, state: FSMContext):
     """Возврат в меню админки"""
     if not await is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
+    await state.clear()
     await callback.message.edit_text(
         LEXICON_RU['admin_panel'],
         reply_markup=get_admin_keyboard()
